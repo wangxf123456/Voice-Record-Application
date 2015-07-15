@@ -10,30 +10,71 @@ import android.media.*;
 import android.os.Environment;
 import android.widget.Button;
 import android.view.KeyEvent;
+
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.*;
 
 public class MainActivity extends Activity{
 
-    private static final int RECORDER_SAMPLERATE = 8000;
+    private static final int RECORDER_SAMPLERATE = 4096;
     private static final int RECORDER_CHANNELS = AudioFormat.CHANNEL_IN_MONO;
     private static final int RECORDER_AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT;
     private static final int RECORDER_CHANNELS_IN = AudioFormat.CHANNEL_IN_MONO;
     private static final int RECORDER_CHANNELS_OUT = AudioFormat.CHANNEL_OUT_MONO;
     private AudioRecord recorder = null;
     private Thread recordingThread = null;
+    private Thread listenThread = null;
     private boolean isRecording = false;
 
+    private int PORT = 3333;
+    private int CHUNK_SIZE = 2048;
+    private String HOSTNAME = "127.0.0.1";
+    private boolean server_continue = true;
+    private boolean client_continue = true;
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        listenThread = new Thread(new Runnable() {
+            public void run() {
+                server_thread();
+            }
+        }, "Listening Thread");
+        listenThread.start();
 
         setButtonHandlers();
         enableButtons(false);
 
         int bufferSize = AudioRecord.getMinBufferSize(RECORDER_SAMPLERATE,
                 RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING);
+    }
+
+    private void server_thread() {
+        Socket socket = null;
+
+        try {
+            ServerSocket server = new ServerSocket(PORT);
+            while (true) {
+                System.out.println("Server waiting for connection...");
+                socket = server.accept();
+                byte[] buffer = new byte[CHUNK_SIZE];
+                int bytesRead;
+                int pos = 0;
+                InputStream socket_in = socket.getInputStream();
+                while ((bytesRead = socket_in.read(buffer, 0, CHUNK_SIZE)) >= 0) {
+                    pos += bytesRead;
+                    System.out.println(pos + " bytes (" + bytesRead + " bytes read)");
+                    PlayViaAudioTrack(buffer);
+                    if (!server_continue) {
+                        return;
+                    }
+                }
+            }
+        } catch (IOException ex) {
+            System.out.println("Can't setup server on this port number. ");
+        }
     }
 
     private void setButtonHandlers() {
@@ -63,10 +104,78 @@ public class MainActivity extends Activity{
         isRecording = true;
         recordingThread = new Thread(new Runnable() {
             public void run() {
-                writeAudioDataToFile();
+                client_thread();
             }
         }, "AudioRecorder Thread");
         recordingThread.start();
+    }
+
+    private void client_thread() {
+        Socket socket = null;
+        try {
+            System.out.println("Connecting to server...");
+            socket = new Socket(HOSTNAME, PORT);
+            System.out.println("Connected to server at " + socket.getInetAddress());
+
+            PrintStream out = new PrintStream(socket.getOutputStream(), true);
+
+            recordAndSendToSocket(out);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (socket != null) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    private void recordAndSendToSocket(OutputStream outStream) {
+        short sData[] = new short[BufferElements2Rec];
+
+        System.out.println("start recording");
+        while (isRecording) {
+
+            recorder.read(sData, 0, BufferElements2Rec);
+
+            try {
+                byte bData[] = short2byte(sData);
+                System.out.println("send audio data: " + bData);
+                outStream.write(bData, 0, BufferElements2Rec * BytesPerElement);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void stopRecording() {
+        // stops the recording activity
+        if (null != recorder) {
+            isRecording = false;
+            recorder.stop();
+            recorder.release();
+            recorder = null;
+            recordingThread = null;
+        }
+    }
+
+    private void PlayViaAudioTrack(byte[] byteData) throws IOException{
+        // Set and push to audio track..
+        int intSize = android.media.AudioTrack.getMinBufferSize(RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING);
+
+        AudioTrack at = new AudioTrack(AudioManager.STREAM_MUSIC, RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING, intSize, AudioTrack.MODE_STREAM);
+        if (at != null) {
+            at.play();
+            // Write the byte array to the track
+            System.out.println("play write length: " + byteData.length);
+            at.write(byteData, 0, byteData.length);
+            at.stop();
+            at.release();
+        }
+
     }
 
     //convert short to byte
@@ -79,92 +188,6 @@ public class MainActivity extends Activity{
             sData[i] = 0;
         }
         return bytes;
-
-    }
-
-    private void writeAudioDataToFile() {
-        // Write the output audio in byte
-        File root = Environment.getExternalStorageDirectory();
-        System.out.println(root.toString());
-        File file = new File(root, "voice8K16bitmono.pcm");
-        String filePath = root.toString() + "/voice8K16bitmono.pcm";
-        short sData[] = new short[BufferElements2Rec];
-//
-        FileOutputStream os = null;
-        try {
-            os = new FileOutputStream(filePath);
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-
-        while (isRecording) {
-            // gets the voice output from microphone to byte format
-
-            recorder.read(sData, 0, BufferElements2Rec);
-
-//            byte bData[] = short2byte(sData);
-//            System.out.println("Short wirting to file " + bData.toString());
-            try {
-                // // writes the data to file from buffer
-                // // stores the voice buffer
-                byte bData[] = short2byte(sData);
-                os.write(bData, 0, BufferElements2Rec * BytesPerElement);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        try {
-            os.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void stopRecording() {
-        // stops the recording activity
-        if (null != recorder) {
-            isRecording = false;
-            recorder.stop();
-            recorder.release();
-            recorder = null;
-            recordingThread = null;
-            try {
-                PlayShortAudioFileViaAudioTrack("/storage/sdcard/voice8K16bitmono.pcm");
-            } catch (Exception e){
-                e.printStackTrace();
-            }
-        }
-    }
-
-    private void PlayShortAudioFileViaAudioTrack(String filePath) throws IOException{
-        // We keep temporarily filePath globally as we have only two sample sounds now..
-        if (filePath==null)
-            return;
-
-        //Reading the file..
-        File file = new File(filePath); // for ex. path= "/sdcard/samplesound.pcm" or "/sdcard/samplesound.wav"
-        byte[] byteData = new byte[(int) file.length()];
-
-        FileInputStream in = null;
-        try {
-            in = new FileInputStream( file );
-            in.read( byteData );
-            in.close();
-        } catch (FileNotFoundException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-        // Set and push to audio track..
-        int intSize = android.media.AudioTrack.getMinBufferSize(RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING);
-
-        AudioTrack at = new AudioTrack(AudioManager.STREAM_MUSIC, RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING, intSize, AudioTrack.MODE_STREAM);
-        if (at!=null) {
-            at.play();
-            // Write the byte array to the track
-            at.write(byteData, 0, byteData.length);
-            at.stop();
-            at.release();
-        }
 
     }
 

@@ -10,6 +10,8 @@ import android.media.*;
 import android.os.Environment;
 import android.widget.Button;
 import android.view.KeyEvent;
+import android.widget.EditText;
+import android.widget.TextView;
 
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -24,7 +26,6 @@ public class MainActivity extends Activity{
     private static final int RECORDER_CHANNELS_OUT = AudioFormat.CHANNEL_OUT_MONO;
     private AudioRecord recorder = null;
     private Thread recordingThread = null;
-    private Thread listenThread = null;
     private boolean isRecording = false;
 
     private int PORT = 3333;
@@ -37,44 +38,11 @@ public class MainActivity extends Activity{
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        listenThread = new Thread(new Runnable() {
-            public void run() {
-                server_thread();
-            }
-        }, "Listening Thread");
-        listenThread.start();
-
         setButtonHandlers();
         enableButtons(false);
 
         int bufferSize = AudioRecord.getMinBufferSize(RECORDER_SAMPLERATE,
                 RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING);
-    }
-
-    private void server_thread() {
-        Socket socket = null;
-
-        try {
-            ServerSocket server = new ServerSocket(PORT);
-            while (true) {
-                System.out.println("Server waiting for connection...");
-                socket = server.accept();
-                byte[] buffer = new byte[CHUNK_SIZE];
-                int bytesRead;
-                int pos = 0;
-                InputStream socket_in = socket.getInputStream();
-                while ((bytesRead = socket_in.read(buffer, 0, CHUNK_SIZE)) >= 0) {
-                    pos += bytesRead;
-                    System.out.println(pos + " bytes (" + bytesRead + " bytes read)");
-                    PlayViaAudioTrack(buffer);
-                    if (!server_continue) {
-                        return;
-                    }
-                }
-            }
-        } catch (IOException ex) {
-            System.out.println("Can't setup server on this port number. ");
-        }
     }
 
     private void setButtonHandlers() {
@@ -104,15 +72,16 @@ public class MainActivity extends Activity{
         isRecording = true;
         recordingThread = new Thread(new Runnable() {
             public void run() {
-                client_thread();
+                record_thread();
             }
         }, "AudioRecorder Thread");
         recordingThread.start();
     }
 
-    private void client_thread() {
+    private void record_thread() {
         Socket socket = null;
         try {
+            HOSTNAME = ((EditText) findViewById(R.id.ipEditText)).getText().toString();
             System.out.println("Connecting to server...");
             socket = new Socket(HOSTNAME, PORT);
             System.out.println("Connected to server at " + socket.getInetAddress());
@@ -159,23 +128,8 @@ public class MainActivity extends Activity{
             recorder.release();
             recorder = null;
             recordingThread = null;
+            PORT++;
         }
-    }
-
-    private void PlayViaAudioTrack(byte[] byteData) throws IOException{
-        // Set and push to audio track..
-        int intSize = android.media.AudioTrack.getMinBufferSize(RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING);
-
-        AudioTrack at = new AudioTrack(AudioManager.STREAM_MUSIC, RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING, intSize, AudioTrack.MODE_STREAM);
-        if (at != null) {
-            at.play();
-            // Write the byte array to the track
-            System.out.println("play write length: " + byteData.length);
-            at.write(byteData, 0, byteData.length);
-            at.stop();
-            at.release();
-        }
-
     }
 
     //convert short to byte

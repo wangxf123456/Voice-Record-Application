@@ -13,6 +13,17 @@ import android.view.KeyEvent;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import android.app.ProgressDialog;
+
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
+
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.*;
@@ -28,11 +39,12 @@ public class MainActivity extends Activity{
     private Thread recordingThread = null;
     private boolean isRecording = false;
 
-    private int PORT = 3333;
     private int CHUNK_SIZE = 2048;
-    private String HOSTNAME = "127.0.0.1";
     private boolean server_continue = true;
     private boolean client_continue = true;
+
+    private ProgressDialog dialog;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -81,7 +93,17 @@ public class MainActivity extends Activity{
     private void record_thread() {
         Socket socket = null;
         try {
-            HOSTNAME = ((EditText) findViewById(R.id.ipEditText)).getText().toString();
+            String HOSTNAMEANDPORT = getIpAddr();
+            System.out.println("get host name: " + HOSTNAMEANDPORT);
+            if (HOSTNAMEANDPORT.length() < 1) {
+                dialog.dismiss();
+                stopRecording();
+                return;
+            }
+            String[] separated = HOSTNAMEANDPORT.split(":");
+            String HOSTNAME = separated[0];
+            int PORT = Integer.parseInt(separated[1]);
+
             System.out.println("Connecting to server...");
             socket = new Socket(HOSTNAME, PORT);
             System.out.println("Connected to server at " + socket.getInetAddress());
@@ -128,7 +150,6 @@ public class MainActivity extends Activity{
             recorder.release();
             recorder = null;
             recordingThread = null;
-            PORT++;
         }
     }
 
@@ -145,11 +166,55 @@ public class MainActivity extends Activity{
 
     }
 
+    private static String convertStreamToString(InputStream inputStream) throws IOException {
+        if (inputStream != null) {
+            Writer writer = new StringWriter();
+
+            char[] buffer = new char[1024];
+            try {
+                Reader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"),1024);
+                int n;
+                while ((n = reader.read(buffer)) != -1) {
+                    writer.write(buffer, 0, n);
+                }
+            } finally {
+                inputStream.close();
+            }
+            return writer.toString();
+        } else {
+            return "";
+        }
+    }
+
+    private String getIpAddr() {
+
+        HttpClient httpclient = new DefaultHttpClient();
+        HttpGet request = new HttpGet("http://52.25.63.79/api/voice");
+        HttpResponse response;
+        String content = "";
+        try {
+            response = httpclient.execute(request);
+            content = convertStreamToString(response.getEntity().getContent());
+            if (response.getStatusLine().getStatusCode() == 404) {
+                return "";
+            }
+        } catch (ClientProtocolException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        System.out.println("get content: " + content);
+        return content;
+    }
+
     private View.OnClickListener btnClick = new View.OnClickListener() {
         public void onClick(View v) {
             switch (v.getId()) {
                 case R.id.btnStart: {
                     enableButtons(true);
+                    dialog = ProgressDialog.show(MainActivity.this, "wait...", "Retrieving ip and connecting");
                     startRecording();
                     break;
                 }

@@ -1,6 +1,8 @@
 <resources>
-    <string name="app_name">SocketApplication</string>
+    <string name="app_name">RecordApplication</string>
 
     <string name="hello_world">Hello world!</string>
     <string name="action_settings">Settings</string>
+    <string name="title_activity_start">StartActivity</string>
+    <string name="title_activity_play">PlayActivity</string>
 </resources>

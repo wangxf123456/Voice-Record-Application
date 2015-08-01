@@ -12,6 +12,7 @@ import android.widget.Button;
 import android.view.KeyEvent;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import android.app.ProgressDialog;
 
@@ -28,7 +29,12 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.*;
 
-public class MainActivity extends Activity{
+import com.parse.ParseException;
+import com.parse.ParseFile;
+import com.parse.ParseObject;
+import com.parse.SaveCallback;
+
+public class MainActivity extends Activity {
 
     private static final int RECORDER_SAMPLERATE = 4096;
     private static final int RECORDER_CHANNELS = AudioFormat.CHANNEL_IN_MONO;
@@ -40,8 +46,7 @@ public class MainActivity extends Activity{
     private boolean isRecording = false;
 
     private int CHUNK_SIZE = 2048;
-    private boolean server_continue = true;
-    private boolean client_continue = true;
+    private boolean sflag = true;
 
     private ProgressDialog dialog;
 
@@ -94,9 +99,10 @@ public class MainActivity extends Activity{
         Socket socket = null;
         try {
             String HOSTNAMEANDPORT = getIpAddr();
+            dialog.dismiss();
             System.out.println("get host name: " + HOSTNAMEANDPORT);
             if (HOSTNAMEANDPORT.length() < 1) {
-                dialog.dismiss();
+                sflag = false;
                 stopRecording();
                 return;
             }
@@ -125,6 +131,28 @@ public class MainActivity extends Activity{
     }
 
     private void recordAndSendToSocket(OutputStream outStream) {
+        File root = Environment.getExternalStorageDirectory();
+        String filePath = root.toString() + "/voice8K16bitmono.pcm";
+
+        System.out.println(root.toString());
+        File file = new File(root, "voice8K16bitmono.pcm");
+//
+//        if (file.exists()) {
+//            try {
+//                RandomAccessFile raf = new RandomAccessFile(file, "rw");
+//                raf.setLength(0);
+//            } catch (Exception e) {
+//                e.printStackTrace();
+//            }
+//        }
+
+        FileOutputStream os = null;
+        try {
+            os = new FileOutputStream(filePath);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        System.out.println("file: " + filePath + " created");
         short sData[] = new short[BufferElements2Rec];
 
         System.out.println("start recording");
@@ -134,22 +162,67 @@ public class MainActivity extends Activity{
 
             try {
                 byte bData[] = short2byte(sData);
-                System.out.println("send audio data: " + bData);
                 outStream.write(bData, 0, BufferElements2Rec * BytesPerElement);
+                System.out.println("send audio data: " + bData);
+                os.write(bData, 0, BufferElements2Rec * BytesPerElement);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
+        try {
+            os.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
+    private void uploadFileToCloud() {
+        dialog = ProgressDialog.show(MainActivity.this, "wait...", "Uploading file");
+        File root = Environment.getExternalStorageDirectory();
+        System.out.println(root.toString());
+        File file = new File(root, "voice8K16bitmono.pcm");
+
+        String content = "";
+        FileReader reader = null;
+        try {
+            reader = new FileReader(file);
+            char[] chars = new char[(int) file.length()];
+            reader.read(chars);
+            content = new String(chars);
+            reader.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if(reader !=null){
+                try {
+                    reader.close();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        System.out.println("content is:" + content);
+        byte[] data = content.getBytes();
+        ParseObject record = new ParseObject("HeartRateRecord");
+        record.put("userid", "qk7KRdygva");
+        ParseFile pFile = new ParseFile("heartRate.pcm", data);
+        record.put("heartRateFile", pFile);
+        record.saveInBackground(new SaveCallback() {
+            @Override
+            public void done(ParseException e) {
+                dialog.dismiss();
+            }
+        });
+    }
     private void stopRecording() {
         // stops the recording activity
-        if (null != recorder) {
+        if (recorder != null) {
             isRecording = false;
             recorder.stop();
             recorder.release();
             recorder = null;
             recordingThread = null;
+
         }
     }
 
@@ -221,6 +294,9 @@ public class MainActivity extends Activity{
                 case R.id.btnStop: {
                     enableButtons(false);
                     stopRecording();
+                    if (sflag) {
+//                        uploadFileToCloud();
+                    }
                     break;
                 }
             }
